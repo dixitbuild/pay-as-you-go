@@ -9,9 +9,9 @@ from accounts.models import User
 from config.exceptions import DomainError, InsufficientBalance, InvalidTransition
 from wallet import services as wallet_services
 
-from .models import Session
+from .models import EndedBy, Session, SessionStatus
 
-S = Session.Status
+S = SessionStatus
 
 # The state machine: for each action, the states it may start from.
 TRANSITIONS = {
@@ -21,10 +21,6 @@ TRANSITIONS = {
     "end": {S.IN_PROGRESS},
     "cancel": {S.UNASSIGNED, S.ASSIGNED, S.ACCEPTED},
 }
-
-ENDED_BY_USER = "user"
-ENDED_BY_PROVIDER = "provider"
-ENDED_BY_SYSTEM_NO_BALANCE = "system:insufficient_balance"
 
 
 def _lock(session_id):
@@ -127,7 +123,7 @@ def _bill(session, now):
             )
         except InsufficientBalance:
             session.status = S.COMPLETED
-            session.ended_by = ENDED_BY_SYSTEM_NO_BALANCE
+            session.ended_by = EndedBy.SYSTEM_INSUFFICIENT_BALANCE
             session.ended_at = now
             session.billable_seconds = session.billed_minutes * 60
             break
@@ -157,7 +153,7 @@ def end(session_id, user, now=None):
     _bill(session, now)  # settle any full minutes owed first
     if session.status == S.IN_PROGRESS:  # not already auto-ended for lack of balance
         session.status = S.COMPLETED
-        session.ended_by = ENDED_BY_USER if user.id == session.user_id else ENDED_BY_PROVIDER
+        session.ended_by = EndedBy.USER if user.id == session.user_id else EndedBy.PROVIDER
         session.ended_at = now
         session.billable_seconds = int((now - session.started_at).total_seconds())
         session.save()

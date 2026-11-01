@@ -13,28 +13,34 @@ class Wallet(models.Model):
         ]
 
 
+class RechargeStatus(models.TextChoices):
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class LedgerType(models.TextChoices):
+    CREDIT = "credit"
+    DEBIT = "debit"
+
+
 class RechargeTransaction(models.Model):
-    class Status(models.TextChoices):
-        PENDING = "pending"
-        SUCCESS = "success"
-        FAILED = "failed"
+    Status = RechargeStatus
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="recharges")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     reference = models.CharField(max_length=40, unique=True)
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(max_length=10, choices=RechargeStatus.choices, default=RechargeStatus.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
 class LedgerEntry(models.Model):
     """One row per wallet credit or debit, so every balance change can be traced."""
 
-    class Type(models.TextChoices):
-        CREDIT = "credit"
-        DEBIT = "debit"
+    Type = LedgerType
 
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name="entries")
-    type = models.CharField(max_length=10, choices=Type.choices)
+    type = models.CharField(max_length=10, choices=LedgerType.choices)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     recharge = models.ForeignKey(RechargeTransaction, null=True, blank=True, on_delete=models.SET_NULL)
     session = models.ForeignKey("sessions_app.Session", null=True, blank=True, on_delete=models.SET_NULL)
@@ -46,7 +52,7 @@ class LedgerEntry(models.Model):
             # A given minute of a given session can only ever be debited once.
             models.UniqueConstraint(
                 fields=["session", "minute_index"],
-                condition=Q(type="debit"),
+                condition=Q(type=LedgerType.DEBIT),
                 name="one_debit_per_session_minute",
             ),
         ]

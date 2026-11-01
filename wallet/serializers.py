@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import RechargeTransaction
+from .models import RechargeStatus, RechargeTransaction
 
 
 class RechargeCreateSerializer(serializers.Serializer):
@@ -11,7 +11,7 @@ class RechargeCreateSerializer(serializers.Serializer):
 
 class CallbackSerializer(serializers.Serializer):
     reference = serializers.CharField()
-    status = serializers.ChoiceField(choices=["success", "failed"])
+    status = serializers.ChoiceField(choices=[RechargeStatus.SUCCESS, RechargeStatus.FAILED])
 
 
 class RechargeSerializer(serializers.ModelSerializer):
