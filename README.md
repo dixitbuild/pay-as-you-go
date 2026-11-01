@@ -26,11 +26,71 @@ All APIs below are implemented. See [plan.md](plan.md) for the design and [DESIG
 
 ## Setup
 
+### Prerequisites
+
+- Python 3.12 or newer (`.python-version` pins 3.12)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (the package manager). Install it with `brew install uv` on macOS, or `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- Git
+
+`uv` downloads the right Python and creates the virtual environment for you. You do not need to run `pip` or activate a venv.
+
+### Steps
+
 ```bash
-uv sync                              # install dependencies
-uv run python manage.py migrate      # create the database
-uv run python manage.py runserver    # http://127.0.0.1:8000
+# 1. Get the code
+git clone <repo-url> pay-as-you-go
+cd pay-as-you-go
+
+# 2. Install dependencies into .venv (Django, Django REST Framework)
+uv sync
+
+# 3. Create the database tables (SQLite file db.sqlite3, created automatically)
+uv run python manage.py migrate
+
+# 4. Check everything is wired up
+uv run python manage.py test
+
+# 5. Start the API at http://127.0.0.1:8000
+uv run python manage.py runserver
 ```
+
+Step 4 should end with `OK` after 38 tests. No `.env` file or external service is needed.
+
+### Try it
+
+With the server running, register a user:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/register/ \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"S3cure-pass!","role":"USER"}'
+```
+
+A `201` response with a token means the setup works. Continue with the [API playbook](#api-playbook).
+
+### Optional configuration
+
+| What | How |
+|---|---|
+| Session price or minimum start balance | Edit `SESSION_RATE_PER_MINUTE` and `MIN_START_MINUTES` in `config/settings.py` |
+| PostgreSQL instead of SQLite | Run `uv add psycopg[binary]`, then change `DATABASES` in `config/settings.py` to the `django.db.backends.postgresql` engine with your `NAME`, `USER`, `PASSWORD`, `HOST`. Run `migrate` again. |
+| Periodic billing | Run `uv run python manage.py bill_active_sessions` from cron every minute (for example `* * * * * cd /path/to/pay-as-you-go && uv run python manage.py bill_active_sessions`) |
+
+### Reset the database
+
+```bash
+rm db.sqlite3
+uv run python manage.py migrate
+```
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `uv: command not found` | Install uv (see Prerequisites), then open a new terminal |
+| `Port 8000 already in use` | `uv run python manage.py runserver 8001` |
+| `no such table` errors | Run `uv run python manage.py migrate` |
+| `401 Authentication credentials were not provided` | Add the header `Authorization: Token <your token>` |
 
 ## Run the tests
 
