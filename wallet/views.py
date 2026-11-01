@@ -9,7 +9,7 @@ from .serializers import CallbackSerializer, RechargeCreateSerializer, RechargeS
 class WalletView(APIView):
     def get(self, request):
         wallet = services.get_wallet(request.user)
-        return Response({"balance": str(wallet.balance)})
+        return Response({"balance": f"{wallet.balance:.2f}"})
 
 
 class RechargeView(APIView):

@@ -290,17 +290,212 @@ erDiagram
 | Two active sessions for one user | Check before start | Partial unique on `user` where status is `in_progress` |
 | Concurrent requests | `transaction.atomic()` and `select_for_update()`, always session then wallet | Row locks |
 
-## Quick try-out
+## API playbook
+
+Copy-paste walkthrough. Every response below was captured from a real run against `runserver` (tokens, timestamps and references will differ on your machine).
+
+Start the server and open a second terminal for the commands:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/auth/register/ \
-  -H "Content-Type: application/json" \
-  -d '{"username": "alice", "password": "S3cure-pass!", "role": "USER"}'
-
-curl -X POST http://127.0.0.1:8000/auth/login/ \
-  -H "Content-Type: application/json" \
-  -d '{"username": "alice", "password": "S3cure-pass!"}'
+uv run python manage.py migrate
+uv run python manage.py runserver
 ```
+
+```bash
+B=http://127.0.0.1:8000
+J='Content-Type: application/json'
+```
+
+### Play 1 · Happy path: recharge, book, talk 2 minutes, pay Rs 100
+
+**1. Register a user and a provider**
+
+```bash
+curl -X POST $B/auth/register/ -H "$J" \
+  -d '{"username":"alice","password":"S3cure-pass!","role":"USER"}'
+```
+```json
+{"id":1,"username":"alice","role":"USER","token":"a51a12fe758f3f9e33294f9051a257d10c5a097b"}
+```
+```bash
+curl -X POST $B/auth/register/ -H "$J" \
+  -d '{"username":"dr_bob","password":"S3cure-pass!","role":"PROVIDER"}'
+```
+```json
+{"id":2,"username":"dr_bob","role":"PROVIDER","token":"7461a9a6220a7f1e1a2040f621fa2ab83ecfd51f"}
+```
+
+Save the tokens (use the `login` endpoint later to get them again):
+
+```bash
+UA="Authorization: Token <alice token>"
+PA="Authorization: Token <dr_bob token>"
+```
+
+**2. Check the wallet (empty)**
+
+```bash
+curl $B/wallet/ -H "$UA"
+```
+```json
+{"balance":"0.00"}
+```
+
+**3. Start a recharge (wallet is not credited yet)**
+
+```bash
+curl -X POST $B/wallet/recharge/ -H "$UA" -H "$J" -d '{"amount":"500.00"}'
+```
+```json
+{"reference":"rch_910436746185","amount":"500.00","status":"pending"}
+```
+
+**4. Complete it with the mock webhook (no auth header)**
+
+```bash
+curl -X POST $B/wallet/recharge/callback/ -H "$J" \
+  -d '{"reference":"rch_910436746185","status":"success"}'
+```
+```json
+{"reference":"rch_910436746185","amount":"500.00","status":"success","balance":"500.00"}
+```
+
+Send the exact same callback again. It returns `200` with the same body and the balance stays `500.00` (credited once).
+
+**5. Create a session (user)**
+
+```bash
+curl -X POST $B/sessions/ -H "$UA"
+```
+```json
+{"id":1,"user":1,"provider":null,"status":"unassigned","rate_per_minute":null,"started_at":null,"ended_at":null,"billed_minutes":0,"total_billed":"0.00","billable_seconds":0,"ended_by":null}
+```
+
+**6. Assign the provider (user)**
+
+```bash
+curl -X POST $B/sessions/1/assign/ -H "$UA" -H "$J" -d '{"provider_id":2}'
+```
+```json
+{"id":1,"user":1,"provider":2,"status":"assigned", "...":"..."}
+```
+
+**7. Provider accepts**
+
+```bash
+curl -X POST $B/sessions/1/accept/ -H "$PA"
+```
+```json
+{"id":1,"user":1,"provider":2,"status":"accepted_by_provider", "...":"..."}
+```
+
+**8. User starts (rate is fixed here)**
+
+```bash
+curl -X POST $B/sessions/1/start/ -H "$UA"
+```
+```json
+{"id":1,"user":1,"provider":2,"status":"in_progress","rate_per_minute":"50.00","started_at":"2026-11-01T19:10:16.148458Z","ended_at":null,"billed_minutes":0,"total_billed":"0.00","billable_seconds":0,"ended_by":null}
+```
+
+**9. Bill after 2 minutes**
+
+Wait two real minutes, or move the start time back in a dev shell (this only simulates the passing of time):
+
+```bash
+uv run python manage.py shell -c "
+from sessions_app.models import Session; from datetime import timedelta
+s = Session.objects.get(pk=1); s.started_at -= timedelta(minutes=2, seconds=10); s.save()"
+```
+```bash
+curl -X POST $B/sessions/1/bill/ -H "$UA"
+```
+```json
+{"id":1,"user":1,"provider":2,"status":"in_progress","rate_per_minute":"50.00","started_at":"2026-11-01T19:08:06.148458Z","ended_at":null,"billed_minutes":2,"total_billed":"100.00","billable_seconds":0,"ended_by":null}
+```
+
+Call bill again right away: `billed_minutes` stays `2`, so nothing more is charged.
+
+**10. End the session**
+
+```bash
+curl -X POST $B/sessions/1/end/ -H "$UA"
+```
+```json
+{"id":1,"user":1,"provider":2,"status":"completed","rate_per_minute":"50.00","started_at":"2026-11-01T19:08:06.148458Z","ended_at":"2026-11-01T19:10:16.297071Z","billed_minutes":2,"total_billed":"100.00","billable_seconds":130,"ended_by":"user"}
+```
+
+**11. Check the wallet**
+
+```bash
+curl $B/wallet/ -H "$UA"
+```
+```json
+{"balance":"400.00"}
+```
+
+### Play 2 · Not enough balance to start
+
+Wallet Rs 240, session already `accepted_by_provider`:
+
+```bash
+curl -X POST $B/sessions/1/start/ -H "$UA"
+```
+```json
+{"error":"Insufficient balance. At least 250 is required to start a session."}
+```
+HTTP `400`. After recharging Rs 20 (total 260) the same call returns `200` and the session is `in_progress`.
+
+### Play 3 · Balance runs out, system ends the session
+
+Wallet Rs 260, session started. After 5 min 20 s:
+
+```bash
+curl -X POST $B/sessions/1/bill/ -H "$UA"
+```
+```json
+{"id":1,"status":"in_progress","billed_minutes":5,"total_billed":"250.00", "...":"..."}
+```
+Wallet is now `10.00`. After 6 min 20 s, the sixth minute (Rs 50) cannot be paid:
+
+```bash
+curl -X POST $B/sessions/1/bill/ -H "$UA"
+```
+```json
+{"id":1,"user":1,"provider":2,"status":"completed","rate_per_minute":"50.00","started_at":"2026-11-01T19:04:17.027680Z","ended_at":"2026-11-01T19:10:37.293756Z","billed_minutes":5,"total_billed":"250.00","billable_seconds":300,"ended_by":"system:insufficient_balance"}
+```
+The wallet stays at `10.00` and never goes negative.
+
+### Play 4 · Errors
+
+| Call | Response |
+|---|---|
+| `POST /sessions/1/end/` on an `unassigned` session | `400` `{"error":"Cannot end a session that is unassigned."}` |
+| `POST /sessions/1/cancel/` on a `completed` session | `400` `{"error":"Cannot cancel a session that is completed."}` |
+| `POST /sessions/2/start/` while another session is `in_progress` | `400` `{"error":"You already have a session in progress."}` |
+| `POST /wallet/recharge/` with `{"amount":"0"}` | `400` `{"amount":["Ensure this value is greater than or equal to 0.01."]}` |
+| `POST /wallet/recharge/callback/` with an unknown reference | `404` `{"detail":"Unknown recharge reference."}` |
+| `POST /sessions/` as a PROVIDER | `403` `{"detail":"Only users can do this."}` |
+| `POST /sessions/` without a token | `401` `{"detail":"Authentication credentials were not provided."}` |
+| `POST /auth/login/` with a wrong password | `400` `{"error":"Invalid username or password."}` |
+
+### Playbook cheat sheet
+
+| Step | Method and path | Caller | Body |
+|---|---|---|---|
+| Register | `POST /auth/register/` | anyone | `{"username","password","role"}` |
+| Login | `POST /auth/login/` | anyone | `{"username","password"}` |
+| Balance | `GET /wallet/` | any logged-in user | none |
+| Recharge | `POST /wallet/recharge/` | any logged-in user | `{"amount"}` |
+| Webhook | `POST /wallet/recharge/callback/` | gateway, no auth | `{"reference","status"}` |
+| Create | `POST /sessions/` | USER | none |
+| Assign | `POST /sessions/<id>/assign/` | owning USER | `{"provider_id"}` |
+| Accept | `POST /sessions/<id>/accept/` | assigned PROVIDER | none |
+| Start | `POST /sessions/<id>/start/` | owning USER | none |
+| Bill | `POST /sessions/<id>/bill/` | owner or provider | none |
+| End | `POST /sessions/<id>/end/` | owner or provider | none |
+| Cancel | `POST /sessions/<id>/cancel/` | owner or provider | none |
+| Read | `GET /sessions/<id>/` | owner or provider | none |
 
 ## Out of scope
 

@@ -8,5 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
-CLAUDE.md
+project.md
 db.sqlite3
