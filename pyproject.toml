@@ -7,7 +7,10 @@ authors = [
     { name = "dixit", email = "dixitbuild@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "django>=6.1.2",
+    "djangorestframework>=3.18.3",
+]
 
 [project.scripts]
 pay-as-you-go = "pay_as_you_go:main"
