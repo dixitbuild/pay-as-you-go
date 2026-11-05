@@ -1,0 +1,941 @@
+{
+  "info": {
+    "name": "Pay As You Go demo",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run folders 1 to 4 in order (Runner or one by one). Rewind time before the first Bill request."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('run')) { pm.collectionVariables.set('run', String(Math.floor(Math.random()*100000))); }"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Setup",
+      "item": [
+        {
+          "name": "Register user (alice)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Pre-request: run id is set by the collection pre-request script so reruns do not clash.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice{{run}}\",\n  \"password\": \"S3cure-pass!\",\n  \"role\": \"USER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 created\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"user_token\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register provider (dr_bob)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"dr_bob{{run}}\",\n  \"password\": \"S3cure-pass!\",\n  \"role\": \"PROVIDER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 created\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"provider_token\", pm.response.json().token);",
+                  "pm.collectionVariables.set(\"provider_id\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Wallet and idempotent recharge",
+      "item": [
+        {
+          "name": "Wallet balance (empty)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"balance is 0.00\", () => pm.expect(pm.response.json().balance).to.eql(\"0.00\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start recharge Rs 500 (pending)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/recharge/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet",
+                "recharge"
+              ]
+            },
+            "description": "The wallet is NOT credited yet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"500.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 pending\", () => { pm.response.to.have.status(201); pm.expect(pm.response.json().status).to.eql(\"pending\"); });",
+                  "pm.collectionVariables.set(\"recharge_ref\", pm.response.json().reference);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wallet balance (still 0)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"still 0.00\", () => pm.expect(pm.response.json().balance).to.eql(\"0.00\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway callback (success)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/recharge/callback/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet",
+                "recharge",
+                "callback"
+              ]
+            },
+            "description": "No auth header: this is the mock payment gateway.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference\": \"{{recharge_ref}}\",\n  \"status\": \"success\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"credited 500\", () => pm.expect(pm.response.json().balance).to.eql(\"500.00\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway callback AGAIN (idempotent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/recharge/callback/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet",
+                "recharge",
+                "callback"
+              ]
+            },
+            "description": "Same body twice. The balance must stay 500.00.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference\": \"{{recharge_ref}}\",\n  \"status\": \"success\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"still 500, credited once\", () => pm.expect(pm.response.json().balance).to.eql(\"500.00\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Session lifecycle and billing",
+      "item": [
+        {
+          "name": "Create session (user)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"unassigned\", () => pm.expect(pm.response.json().status).to.eql(\"unassigned\"));",
+                  "pm.collectionVariables.set(\"session_id\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assign provider (user)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/assign/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "assign"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_id\": \"{{provider_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"assigned\", () => pm.expect(pm.response.json().status).to.eql(\"assigned\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start as provider (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{provider_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/start/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "start"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"403 wrong role\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start too early (400 state machine)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/start/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "start"
+              ]
+            },
+            "description": "Session is still 'assigned', not 'accepted_by_provider'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 invalid transition\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Accept (provider)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{provider_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/accept/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "accept"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted\", () => pm.expect(pm.response.json().status).to.eql(\"accepted_by_provider\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start (user)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/start/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "start"
+              ]
+            },
+            "description": "NEXT: rewind time 2 minutes (see the Postman section in DEMO.md), or just wait 2 real minutes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"in_progress, rate fixed\", () => { const j = pm.response.json(); pm.expect(j.status).to.eql(\"in_progress\"); pm.expect(j.rate_per_minute).to.eql(\"50.00\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bill (after 2 minutes)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/bill/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "bill"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"2 minutes billed = 100.00\", () => { const j = pm.response.json(); pm.expect(j.billed_minutes).to.eql(2); pm.expect(j.total_billed).to.eql(\"100.00\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bill AGAIN (idempotent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/bill/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "bill"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"still 2 / 100.00\", () => { const j = pm.response.json(); pm.expect(j.billed_minutes).to.eql(2); pm.expect(j.total_billed).to.eql(\"100.00\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "End session (user)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/end/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "end"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"completed by user\", () => { const j = pm.response.json(); pm.expect(j.status).to.eql(\"completed\"); pm.expect(j.ended_by).to.eql(\"user\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wallet balance (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"500 - 2x50 = 400.00\", () => pm.expect(pm.response.json().balance).to.eql(\"400.00\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "End AGAIN (400 state machine)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/end/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions",
+                "{{session_id}}",
+                "end"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 cannot end completed\", () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.include(\"completed\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Error cases",
+      "item": [
+        {
+          "name": "No token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Provider creates session (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{provider_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sessions/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recharge amount 0 (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Token {{user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/recharge/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet",
+                "recharge"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Callback unknown reference (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/recharge/callback/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "wallet",
+                "recharge",
+                "callback"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference\": \"rch_nope\",\n  \"status\": \"success\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
